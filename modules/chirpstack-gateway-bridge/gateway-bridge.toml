@@ -52,7 +52,7 @@ join_euis = []
 #   * semtech_udp
 #   * concentratord
 #   * basic_station
-type = "concentratord"
+type = "semtech_udp"
 
 
 # Semtech UDP packet-forwarder backend.

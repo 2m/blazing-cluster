@@ -1,24 +1,33 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   cfg = config.services.chirpstack-gateway-bridge;
 
-  defaultPkg =
-    pkgs.callPackage ../../pkgs/chirpstack-gateway-bridge/package.nix { };
+  defaultPkg = pkgs.callPackage ../../pkgs/chirpstack-gateway-bridge/package.nix { };
 
   configDir = cfg.configDir;
 
-  configSource = if cfg.configFile != null then
-    cfg.configFile
-  else
-    pkgs.writeText "gateway-bridge.toml" cfg.configText;
+  configSource =
+    if cfg.configFile != null then
+      cfg.configFile
+    else
+      pkgs.writeText "gateway-bridge.toml" cfg.configText;
 
-  exec = lib.concatStringsSep " " ([
-    "${cfg.package}/bin/${cfg.binaryName}"
-    "-c"
-    "${configDir}/gateway-bridge.toml"
-  ] ++ cfg.extraArgs);
-in {
+  exec = lib.concatStringsSep " " (
+    [
+      "${cfg.package}/bin/${cfg.binaryName}"
+      "-c"
+      "${configDir}/gateway-bridge.toml"
+    ]
+    ++ cfg.extraArgs
+  );
+in
+{
   options.services.chirpstack-gateway-bridge = {
     enable = lib.mkEnableOption "ChirpStack Gateway Bridge";
 
@@ -47,8 +56,7 @@ in {
     stateDir = lib.mkOption {
       type = lib.types.str;
       default = "/var/lib/chirpstack-gateway-bridge";
-      description =
-        "Writable state directory (logs/runtime files if configured).";
+      description = "Writable state directory (logs/runtime files if configured).";
     };
 
     configDir = lib.mkOption {
@@ -69,8 +77,7 @@ in {
         # Provide TOML via services.chirpstack-gateway-bridge.configFile
         # or override this inline TOML.
       '';
-      description =
-        "Inline gateway-bridge.toml content used when configFile is null.";
+      description = "Inline gateway-bridge.toml content used when configFile is null.";
     };
 
     extraArgs = lib.mkOption {
@@ -103,11 +110,9 @@ in {
       description = "ChirpStack Gateway Bridge";
       wantedBy = [ "multi-user.target" ];
 
-      after = [ "network-online.target" ]
-        ++ lib.optional cfg.waitForMosquitto "mosquitto.service";
+      after = [ "network-online.target" ] ++ lib.optional cfg.waitForMosquitto "mosquitto.service";
 
-      wants = [ "network-online.target" ]
-        ++ lib.optional cfg.waitForMosquitto "mosquitto.service";
+      wants = [ "network-online.target" ] ++ lib.optional cfg.waitForMosquitto "mosquitto.service";
 
       serviceConfig = {
         Type = "simple";
@@ -122,7 +127,7 @@ in {
 
         NoNewPrivileges = true;
         ProtectSystem = "no";
-        ReadWritePaths = [ cfg.stateDir "/run/chirpstack-concentratord" ];
+        ReadWritePaths = [ cfg.stateDir ];
       };
     };
   };
