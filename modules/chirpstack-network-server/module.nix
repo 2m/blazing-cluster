@@ -1,25 +1,46 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   cfg = config.services.chirpstack-network-server;
 
-  defaultPkg =
-    pkgs.callPackage ../../pkgs/chirpstack-network-server/package.nix { };
+  defaultPkg = pkgs.callPackage ../../pkgs/chirpstack-network-server/package.nix { };
 
   configDir = cfg.configDir;
 
-  configSource = if cfg.configFile != null then
-    cfg.configFile
-  else
-    pkgs.writeText "chirpstack.toml" cfg.configText;
+  tomlFormat = pkgs.formats.toml { };
 
-  exec = lib.concatStringsSep " "
-    ([ "${cfg.package}/bin/${cfg.binaryName}" "-c" configDir ]
-      ++ cfg.extraArgs);
-in {
+  defaultSettings = import ./chirpstack.nix;
+  defaultRegion = import ./region.nix;
+
+  mergedSettings = lib.recursiveUpdate defaultSettings cfg.settings;
+  mergedRegion = lib.recursiveUpdate defaultRegion cfg.region;
+
+  configSource = tomlFormat.generate "chirpstack.toml" mergedSettings;
+
+  generatedRegionFiles = lib.mapAttrsToList (name: regionConfig: {
+    "chirpstack/region_${name}.toml" = {
+      source = tomlFormat.generate "region_${name}.toml" { regions = [ regionConfig ]; };
+      mode = "0644";
+    };
+  }) mergedRegion;
+
+  exec = lib.concatStringsSep " " (
+    [
+      "${cfg.package}/bin/${cfg.binaryName}"
+      "-c"
+      configDir
+    ]
+    ++ cfg.extraArgs
+  );
+in
+{
   options.services.chirpstack-network-server = {
-    enable =
-      lib.mkEnableOption "ChirpStack Network Server (SQLite upstream binary)";
+    enable = lib.mkEnableOption "ChirpStack Network Server (SQLite upstream binary)";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -52,34 +73,42 @@ in {
     configDir = lib.mkOption {
       type = lib.types.str;
       default = "/etc/chirpstack";
-      description =
-        "Directory passed to ChirpStack via -c. Must contain chirpstack.toml.";
+      description = "Directory passed to ChirpStack via -c. Must contain chirpstack.toml.";
     };
 
-    configFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description =
-        "Path to a chirpstack.toml file to install into /etc/chirpstack/chirpstack.toml.";
-    };
-
-    regionFiles = lib.mkOption {
-      type = lib.types.listOf lib.types.path;
-      default = [ ];
+    settings = lib.mkOption {
+      type = tomlFormat.type;
+      default = { };
       description = ''
-        List of region_*.toml files (e.g. region_eu868.toml) to be installed
-        alongside chirpstack.toml in the configDir.
+        chirpstack.toml configuration overrides expressed as a Nix attribute set.
+        These values are recursively merged into the default configuration.
+      '';
+      example = lib.literalExpression ''
+        {
+          integration.mqtt.server = "tcp://127.0.0.1:1883/";
+          network.enabled_regions = [ "eu868" ];
+        }
       '';
     };
 
-    configText = lib.mkOption {
-      type = lib.types.lines;
-      default = ''
-        # Provide TOML via services.chirpstack-network-server.configFile
-        # or override this text.
+    region = lib.mkOption {
+      type = lib.types.attrsOf tomlFormat.type;
+      default = { };
+      description = ''
+        Region configuration overrides expressed as Nix attribute sets.
+        These values are recursively merged into the default region configurations.
+        Each top-level attribute is generated as region_<name>.toml using the
+        contents of that attribute.
       '';
-      description =
-        "Inline chirpstack.toml content used when configFile is null.";
+      example = lib.literalExpression ''
+        {
+          eu868 = {
+            name = "eu868";
+            common_name = "EU868";
+            gateway.backend.mqtt.server = "tcp://127.0.0.1:1883";
+          };
+        }
+      '';
     };
 
     extraArgs = lib.mkOption {
@@ -97,8 +126,7 @@ in {
     uiPort = lib.mkOption {
       type = lib.types.port;
       default = 8080;
-      description =
-        "Port to open when openFirewall=true. Must match your TOML bind.";
+      description = "Port to open when openFirewall=true. Must match your TOML bind.";
     };
   };
 
@@ -119,20 +147,18 @@ in {
       "d ${cfg.configDir} 0755 root root - -"
     ];
 
-    # Install region_*.toml files next to chirpstack.toml
-    environment.etc = lib.mkMerge ([{
-      "chirpstack/chirpstack.toml" = {
-        source = configSource;
-        mode = "0644";
-      };
-    }] ++ map (regionFile:
-      let name = builtins.baseNameOf regionFile;
-      in {
-        "chirpstack/${name}" = {
-          source = regionFile;
-          mode = "0644";
-        };
-      }) cfg.regionFiles);
+    # Install generated and explicit region_*.toml files next to chirpstack.toml.
+    environment.etc = lib.mkMerge (
+      [
+        {
+          "chirpstack/chirpstack.toml" = {
+            source = configSource;
+            mode = "0644";
+          };
+        }
+      ]
+      ++ generatedRegionFiles
+    );
 
     # Service
     systemd.services.chirpstack-network-server = {
@@ -140,8 +166,16 @@ in {
       wantedBy = [ "multi-user.target" ];
 
       # Wait for network + deps
-      after = [ "network-online.target" "mosquitto.service" "redis.service" ];
-      wants = [ "network-online.target" "mosquitto.service" "redis.service" ];
+      after = [
+        "network-online.target"
+        "mosquitto.service"
+        "redis.service"
+      ];
+      wants = [
+        "network-online.target"
+        "mosquitto.service"
+        "redis.service"
+      ];
 
       # If you use a non-default redis unit name (e.g. redis-foo.service),
       # change these. Minimal version assumes redis.service.
@@ -168,7 +202,6 @@ in {
     };
 
     # Firewall (optional)
-    networking.firewall.allowedTCPPorts =
-      lib.mkIf cfg.openFirewall [ cfg.uiPort ];
+    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.uiPort ];
   };
 }

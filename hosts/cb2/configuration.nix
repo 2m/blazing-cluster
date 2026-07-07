@@ -61,7 +61,7 @@
   # services.chirpstack-gateway-bridge = {
   #   enable = true;
   #   package = pkgs.chirpstack-gateway-bridge;
-  #   configFile = ../../modules/chirpstack-gateway-bridge/gateway-bridge.toml;
+  #   settings.integration.mqtt.auth.generic.servers = [ "tcp://127.0.0.1:1883" ];
   # };
 
   system.stateVersion = "26.05";

@@ -10,19 +10,19 @@ let
 
   defaultPkg = pkgs.callPackage ../../pkgs/chirpstack-gateway-bridge/package.nix { };
 
-  configDir = cfg.configDir;
+  tomlFormat = pkgs.formats.toml { };
 
-  configSource =
-    if cfg.configFile != null then
-      cfg.configFile
-    else
-      pkgs.writeText "gateway-bridge.toml" cfg.configText;
+  defaultSettings = import ./gateway-bridge.nix;
+
+  mergedSettings = lib.recursiveUpdate defaultSettings cfg.settings;
+
+  configSource = tomlFormat.generate "gateway-bridge.toml" mergedSettings;
 
   exec = lib.concatStringsSep " " (
     [
       "${cfg.package}/bin/${cfg.binaryName}"
       "-c"
-      "${configDir}/gateway-bridge.toml"
+      "${cfg.configDir}/gateway-bridge.toml"
     ]
     ++ cfg.extraArgs
   );
@@ -65,19 +65,19 @@ in
       description = "Directory containing gateway-bridge.toml.";
     };
 
-    configFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = "Path to gateway-bridge.toml to install into configDir.";
-    };
-
-    configText = lib.mkOption {
-      type = lib.types.lines;
-      default = ''
-        # Provide TOML via services.chirpstack-gateway-bridge.configFile
-        # or override this inline TOML.
+    settings = lib.mkOption {
+      type = tomlFormat.type;
+      default = { };
+      description = ''
+        gateway-bridge.toml configuration overrides expressed as a Nix attribute set.
+        These values are recursively merged into the default configuration.
       '';
-      description = "Inline gateway-bridge.toml content used when configFile is null.";
+      example = lib.literalExpression ''
+        {
+          backend.type = "concentratord";
+          integration.mqtt.auth.generic.servers = [ "tcp://127.0.0.1:1883" ];
+        }
+      '';
     };
 
     extraArgs = lib.mkOption {
